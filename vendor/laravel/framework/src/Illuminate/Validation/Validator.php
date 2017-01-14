@@ -6,13 +6,12 @@ use Closure;
 use DateTime;
 use Countable;
 use Exception;
-use Throwable;
 use DateTimeZone;
 use RuntimeException;
 use DateTimeInterface;
-use BadMethodCallException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
+use BadMethodCallException;
 use InvalidArgumentException;
 use Illuminate\Support\Fluent;
 use Illuminate\Support\MessageBag;
@@ -65,6 +64,13 @@ class Validator implements ValidatorContract
      * @var array
      */
     protected $data;
+
+    /**
+     * The files under validation.
+     *
+     * @var array
+     */
+    protected $files = [];
 
     /**
      * The initial rules provided.
@@ -178,7 +184,7 @@ class Validator implements ValidatorContract
     protected $dependentRules = [
         'RequiredWith', 'RequiredWithAll', 'RequiredWithout', 'RequiredWithoutAll',
         'RequiredIf', 'RequiredUnless', 'Confirmed', 'Same', 'Different', 'Unique',
-        'Before', 'After', 'BeforeOrEqual', 'AfterOrEqual',
+        'Before', 'After',
     ];
 
     /**
@@ -191,14 +197,13 @@ class Validator implements ValidatorContract
      * @param  array  $customAttributes
      * @return void
      */
-    public function __construct(TranslatorInterface $translator, array $data, array $rules,
-                                array $messages = [], array $customAttributes = [])
+    public function __construct(TranslatorInterface $translator, array $data, array $rules, array $messages = [], array $customAttributes = [])
     {
         $this->initialRules = $rules;
         $this->translator = $translator;
         $this->customMessages = $messages;
         $this->customAttributes = $customAttributes;
-        $this->data = $this->parseData($data);
+        $this->data = $this->hydrateFiles($this->parseData($data));
 
         $this->setRules($rules);
     }
@@ -229,12 +234,44 @@ class Validator implements ValidatorContract
     }
 
     /**
-     * Explode the rules into an array of rules.
+     * Hydrate the files array.
      *
-     * @param  array  $rules
+     * @param  array   $data
+     * @param  string  $arrayKey
      * @return array
      */
-    protected function explodeRules(array $rules)
+    protected function hydrateFiles(array $data, $arrayKey = null)
+    {
+        if (is_null($arrayKey)) {
+            $this->files = [];
+        }
+
+        foreach ($data as $key => $value) {
+            $newKey = $arrayKey ? "$arrayKey.$key" : $key;
+
+            // If this value is an instance of the HttpFoundation File class we will
+            // remove it from the data array and add it to the files array, which
+            // we use to conveniently separate out these files from other data.
+            if ($value instanceof File) {
+                $this->files[$newKey] = $value;
+
+                unset($data[$key]);
+            } elseif (is_array($value) && ! empty($value) &&
+                      empty($this->hydrateFiles($value, $newKey))) {
+                unset($data[$key]);
+            }
+        }
+
+        return $data;
+    }
+
+    /**
+     * Explode the rules into an array of rules.
+     *
+     * @param  string|array  $rules
+     * @return array
+     */
+    protected function explodeRules($rules)
     {
         foreach ($rules as $key => $rule) {
             if (Str::contains($key, '*')) {
@@ -304,7 +341,9 @@ class Validator implements ValidatorContract
      */
     public function each($attribute, $rules)
     {
-        $data = Arr::dot($this->initializeAttributeOnData($attribute));
+        $data = array_merge(
+            Arr::dot($this->initializeAttributeOnData($attribute)), $this->files
+        );
 
         $pattern = str_replace('\*', '[^\.]+', preg_quote($attribute));
 
@@ -575,7 +614,11 @@ class Validator implements ValidatorContract
      */
     protected function getValue($attribute)
     {
-        return Arr::get($this->data, $attribute);
+        if (! is_null($value = Arr::get($this->data, $attribute))) {
+            return $value;
+        } elseif (! is_null($value = Arr::get($this->files, $attribute))) {
+            return $value;
+        }
     }
 
     /**
@@ -620,14 +663,9 @@ class Validator implements ValidatorContract
     protected function passesOptionalCheck($attribute)
     {
         if ($this->hasRule($attribute, ['Sometimes'])) {
-            $data = Arr::dot($this->initializeAttributeOnData($attribute));
-
-            $data = array_merge($data, $this->extractValuesForWildcards(
-                $data, $attribute
-            ));
-
-            return array_key_exists($attribute, $data)
-                || in_array($attribute, array_keys($this->data));
+            return array_key_exists($attribute, Arr::dot($this->data))
+                || in_array($attribute, array_keys($this->data))
+                || array_key_exists($attribute, $this->files);
         }
 
         return true;
@@ -799,7 +837,7 @@ class Validator implements ValidatorContract
      */
     protected function validatePresent($attribute, $value)
     {
-        return Arr::has($this->data, $attribute);
+        return Arr::has(array_merge($this->data, $this->files), $attribute);
     }
 
     /**
@@ -811,7 +849,7 @@ class Validator implements ValidatorContract
      */
     protected function validateFilled($attribute, $value)
     {
-        if (Arr::has($this->data, $attribute)) {
+        if (Arr::has(array_merge($this->data, $this->files), $attribute)) {
             return $this->validateRequired($attribute, $value);
         }
 
@@ -987,7 +1025,7 @@ class Validator implements ValidatorContract
         $count = 0;
 
         foreach ($attributes as $key) {
-            if (Arr::get($this->data, $key)) {
+            if (Arr::get($this->data, $key) || Arr::get($this->files, $key)) {
                 $count++;
             }
         }
@@ -1338,10 +1376,8 @@ class Validator implements ValidatorContract
 
         $attributeData = $this->extractDataFromPath($explicitPath);
 
-        $pattern = str_replace('\*', '[^.]+', preg_quote($attributeName, '#'));
-
-        $data = Arr::where(Arr::dot($attributeData), function ($value, $key) use ($attribute, $attributeName, $pattern) {
-            return $key != $attribute && (bool) preg_match('#^'.$pattern.'\z#u', $key);
+        $data = Arr::where(Arr::dot($attributeData), function ($value, $key) use ($attribute, $attributeName) {
+            return $key != $attribute && Str::is($attributeName, $key);
         });
 
         return ! in_array($value, array_values($data));
@@ -1402,6 +1438,7 @@ class Validator implements ValidatorContract
 
         return $verifier->getCount(
             $table, $column, $value, $id, $idColumn, $extra
+
         ) == 0;
     }
 
@@ -1617,11 +1654,7 @@ class Validator implements ValidatorContract
         }
 
         if ($url = parse_url($value, PHP_URL_HOST)) {
-            try {
-                return count(dns_get_record($url, DNS_A | DNS_AAAA)) > 0;
-            } catch (Exception $e) {
-                return false;
-            }
+            return count(dns_get_record($url, DNS_A | DNS_AAAA)) > 0;
         }
 
         return false;
@@ -1860,22 +1893,34 @@ class Validator implements ValidatorContract
     {
         $this->requireParameterCount(1, $parameters, 'before');
 
-        return $this->compareDates($attribute, $value, $parameters, '<');
+        if (! is_string($value) && ! is_numeric($value) && ! $value instanceof DateTimeInterface) {
+            return false;
+        }
+
+        if ($format = $this->getDateFormat($attribute)) {
+            return $this->validateBeforeWithFormat($format, $value, $parameters);
+        }
+
+        if (! $date = $this->getDateTimestamp($parameters[0])) {
+            $date = $this->getDateTimestamp($this->getValue($parameters[0]));
+        }
+
+        return $this->getDateTimestamp($value) < $date;
     }
 
     /**
-     * Validate the date is before or equal a given date.
+     * Validate the date is before a given date with a given format.
      *
-     * @param  string  $attribute
+     * @param  string  $format
      * @param  mixed   $value
      * @param  array   $parameters
      * @return bool
      */
-    protected function validateBeforeOrEqual($attribute, $value, $parameters)
+    protected function validateBeforeWithFormat($format, $value, $parameters)
     {
-        $this->requireParameterCount(1, $parameters, 'before_or_equal');
+        $param = $this->getValue($parameters[0]) ?: $parameters[0];
 
-        return $this->compareDates($attribute, $value, $parameters, '<=');
+        return $this->checkDateTimeOrder($format, $value, $param);
     }
 
     /**
@@ -1890,68 +1935,51 @@ class Validator implements ValidatorContract
     {
         $this->requireParameterCount(1, $parameters, 'after');
 
-        return $this->compareDates($attribute, $value, $parameters, '>');
-    }
-
-    /**
-     * Validate the date is equal or after a given date.
-     *
-     * @param  string  $attribute
-     * @param  mixed   $value
-     * @param  array   $parameters
-     * @return bool
-     */
-    protected function validateAfterOrEqual($attribute, $value, $parameters)
-    {
-        $this->requireParameterCount(1, $parameters, 'after_or_equal');
-
-        return $this->compareDates($attribute, $value, $parameters, '>=');
-    }
-
-    /**
-     * Compare a given date against another using an operator.
-     *
-     * @param  string  $attribute
-     * @param  mixed  $value
-     * @param  array  $parameters
-     * @param  string  $operator
-     * @return bool
-     */
-    protected function compareDates($attribute, $value, $parameters, $operator)
-    {
         if (! is_string($value) && ! is_numeric($value) && ! $value instanceof DateTimeInterface) {
             return false;
         }
 
         if ($format = $this->getDateFormat($attribute)) {
-            $param = $this->getValue($parameters[0]) ?: $parameters[0];
-
-            return $this->checkDateTimeOrder($format, $value, $param, $operator);
+            return $this->validateAfterWithFormat($format, $value, $parameters);
         }
 
         if (! $date = $this->getDateTimestamp($parameters[0])) {
             $date = $this->getDateTimestamp($this->getValue($parameters[0]));
         }
 
-        return $this->compare($this->getDateTimestamp($value), $date, $operator);
+        return $this->getDateTimestamp($value) > $date;
+    }
+
+    /**
+     * Validate the date is after a given date with a given format.
+     *
+     * @param  string  $format
+     * @param  mixed   $value
+     * @param  array   $parameters
+     * @return bool
+     */
+    protected function validateAfterWithFormat($format, $value, $parameters)
+    {
+        $param = $this->getValue($parameters[0]) ?: $parameters[0];
+
+        return $this->checkDateTimeOrder($format, $param, $value);
     }
 
     /**
      * Given two date/time strings, check that one is after the other.
      *
      * @param  string  $format
-     * @param  string  $first
-     * @param  string  $second
-     * @param  string  $operator
+     * @param  string  $before
+     * @param  string  $after
      * @return bool
      */
-    protected function checkDateTimeOrder($format, $first, $second, $operator)
+    protected function checkDateTimeOrder($format, $before, $after)
     {
-        $first = $this->getDateTimeWithOptionalFormat($format, $first);
+        $before = $this->getDateTimeWithOptionalFormat($format, $before);
 
-        $second = $this->getDateTimeWithOptionalFormat($format, $second);
+        $after = $this->getDateTimeWithOptionalFormat($format, $after);
 
-        return ($first && $second) && ($this->compare($first, $second, $operator));
+        return ($before && $after) && ($after > $before);
     }
 
     /**
@@ -1988,8 +2016,6 @@ class Validator implements ValidatorContract
         try {
             new DateTimeZone($value);
         } catch (Exception $e) {
-            return false;
-        } catch (Throwable $e) {
             return false;
         }
 
@@ -2161,7 +2187,7 @@ class Validator implements ValidatorContract
             return 'numeric';
         } elseif ($this->hasRule($attribute, ['Array'])) {
             return 'array';
-        } elseif ($this->getValue($attribute) instanceof UploadedFile) {
+        } elseif (array_key_exists($attribute, $this->files)) {
             return 'file';
         }
 
@@ -2237,7 +2263,7 @@ class Validator implements ValidatorContract
             }
 
             $line = Arr::get(
-                $this->translator->trans('validation.attributes'),
+                $this->translator->get('validation.attributes'),
                 $expectedAttributeName
             );
 
@@ -2631,7 +2657,7 @@ class Validator implements ValidatorContract
      */
     public function attributes()
     {
-        return $this->data;
+        return array_merge($this->data, $this->files);
     }
 
     /**
@@ -2805,7 +2831,7 @@ class Validator implements ValidatorContract
      */
     protected function getExplicitKeys($attribute)
     {
-        $pattern = str_replace('\*', '([^\.]+)', preg_quote($this->getPrimaryAttribute($attribute), '/'));
+        $pattern = str_replace('\*', '([^\.]+)', preg_quote($this->getPrimaryAttribute($attribute)));
 
         if (preg_match('/^'.$pattern.'/', $attribute, $keys)) {
             array_shift($keys);
@@ -3063,6 +3089,29 @@ class Validator implements ValidatorContract
     public function setValueNames(array $values)
     {
         $this->customValues = $values;
+
+        return $this;
+    }
+
+    /**
+     * Get the files under validation.
+     *
+     * @return array
+     */
+    public function getFiles()
+    {
+        return $this->files;
+    }
+
+    /**
+     * Set the files under validation.
+     *
+     * @param  array  $files
+     * @return $this
+     */
+    public function setFiles(array $files)
+    {
+        $this->files = $files;
 
         return $this;
     }
@@ -3349,30 +3398,6 @@ class Validator implements ValidatorContract
     {
         if (count($parameters) < $count) {
             throw new InvalidArgumentException("Validation rule $rule requires at least $count parameters.");
-        }
-    }
-
-    /**
-     * Determine if a comparison passes between the given values.
-     *
-     * @param  mixed  $first
-     * @param  mixed  $second
-     * @param  string  $operator
-     * @return bool
-     */
-    protected function compare($first, $second, $operator)
-    {
-        switch ($operator) {
-            case '<':
-                return $first < $second;
-            case '>':
-                return $first > $second;
-            case '<=':
-                return $first <= $second;
-            case '>=':
-                return $first >= $second;
-            default:
-                throw new \InvalidArgumentException();
         }
     }
 

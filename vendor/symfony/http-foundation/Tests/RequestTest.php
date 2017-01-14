@@ -1107,6 +1107,7 @@ class RequestTest extends \PHPUnit_Framework_TestCase
             array('put'),
             array('delete'),
             array('patch'),
+
         );
     }
 
@@ -1968,7 +1969,7 @@ class RequestTest extends \PHPUnit_Framework_TestCase
     {
         $request = new Request();
         $request->setMethod($method);
-        $this->assertEquals($safe, $request->isMethodSafe(false));
+        $this->assertEquals($safe, $request->isMethodSafe());
     }
 
     public function methodSafeProvider()
@@ -1983,39 +1984,6 @@ class RequestTest extends \PHPUnit_Framework_TestCase
             array('PURGE', false),
             array('OPTIONS', true),
             array('TRACE', true),
-            array('CONNECT', false),
-        );
-    }
-
-    public function testMethodSafeChecksCacheable()
-    {
-        $request = new Request();
-        $request->setMethod('OPTIONS');
-        $this->assertFalse($request->isMethodSafe());
-    }
-
-    /**
-     * @dataProvider methodCacheableProvider
-     */
-    public function testMethodCacheable($method, $chacheable)
-    {
-        $request = new Request();
-        $request->setMethod($method);
-        $this->assertEquals($chacheable, $request->isMethodCacheable());
-    }
-
-    public function methodCacheableProvider()
-    {
-        return array(
-            array('HEAD', true),
-            array('GET', true),
-            array('POST', false),
-            array('PUT', false),
-            array('PATCH', false),
-            array('DELETE', false),
-            array('PURGE', false),
-            array('OPTIONS', false),
-            array('TRACE', false),
             array('CONNECT', false),
         );
     }

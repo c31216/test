@@ -716,30 +716,27 @@ class PHPUnit_Framework_TestResult implements Countable
             } elseif ($e instanceof PHPUnit_Framework_SkippedTestError) {
                 $skipped = true;
             }
+        } catch (AssertionError $e) {
+            $test->addToAssertionCount(1);
+
+            $failure = true;
+            $frame   = $e->getTrace()[0];
+
+            $e = new PHPUnit_Framework_AssertionFailedError(
+                sprintf(
+                    '%s in %s:%s',
+                    $e->getMessage(),
+                    $frame['file'],
+                    $frame['line']
+                )
+            );
         } catch (PHPUnit_Framework_Warning $e) {
             $warning = true;
         } catch (PHPUnit_Framework_Exception $e) {
             $error = true;
         } catch (Throwable $e) {
-            // @see https://github.com/sebastianbergmann/phpunit/issues/2394
-            if (PHP_MAJOR_VERSION === 7 && $e instanceof \AssertionError) {
-                $test->addToAssertionCount(1);
-
-                $failure = true;
-                $frame   = $e->getTrace()[0];
-
-                $e = new PHPUnit_Framework_AssertionFailedError(
-                    sprintf(
-                        '%s in %s:%s',
-                        $e->getMessage(),
-                        $frame['file'],
-                        $frame['line']
-                    )
-                );
-            } else {
-                $e     = new PHPUnit_Framework_ExceptionWrapper($e);
-                $error = true;
-            }
+            $e     = new PHPUnit_Framework_ExceptionWrapper($e);
+            $error = true;
         } catch (Exception $e) {
             $e     = new PHPUnit_Framework_ExceptionWrapper($e);
             $error = true;
@@ -810,14 +807,16 @@ class PHPUnit_Framework_TestResult implements Countable
                     $linesToBeUsed
                 );
             } catch (UnintentionallyCoveredCodeException $cce) {
-                $this->addFailure(
-                    $test,
-                    new PHPUnit_Framework_UnintentionallyCoveredCodeError(
-                        'This test executed code that is not listed as code to be covered or used:' .
-                        PHP_EOL . $cce->getMessage()
-                    ),
-                    $time
-                );
+                if (!$test->isMedium() && !$test->isLarge()) {
+                    $this->addFailure(
+                        $test,
+                        new PHPUnit_Framework_UnintentionallyCoveredCodeError(
+                            'This test executed code that is not listed as code to be covered or used:' .
+                            PHP_EOL . $cce->getMessage()
+                        ),
+                        $time
+                    );
+                }
             } catch (CoveredCodeNotExecutedException $cce) {
                 $this->addFailure(
                     $test,

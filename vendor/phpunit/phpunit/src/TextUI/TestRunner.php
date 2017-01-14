@@ -286,32 +286,10 @@ class PHPUnit_TextUI_TestRunner extends PHPUnit_Runner_BaseTestRunner
                         $arguments['configuration']->getFilename()
                     );
                 }
-
-                foreach ($arguments['loadedExtensions'] as $extension) {
-                    $this->writeMessage(
-                        'Extension',
-                        $extension
-                    );
-                }
-
-                foreach ($arguments['notLoadedExtensions'] as $extension) {
-                    $this->writeMessage(
-                        'Extension',
-                        $extension
-                    );
-                }
             }
 
             if (isset($arguments['deprecatedCheckForUnintentionallyCoveredCodeSettingUsed'])) {
-                $this->writeMessage('Warning', 'Deprecated configuration setting "checkForUnintentionallyCoveredCode" used');
-            }
-
-            if (isset($arguments['tapLogfile'])) {
-                $this->writeMessage('Warning', 'Deprecated TAP test listener used');
-            }
-
-            if (isset($arguments['jsonLogfile'])) {
-                $this->writeMessage('Warning', 'Deprecated JSON test listener used');
+                print "Warning:       Deprecated configuration setting \"checkForUnintentionallyCoveredCode\" used\n";
             }
         }
 

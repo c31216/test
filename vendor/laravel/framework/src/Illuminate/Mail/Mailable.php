@@ -19,84 +19,84 @@ class Mailable implements MailableContract
      *
      * @var array
      */
-    public $from = [];
+    protected $from = [];
 
     /**
      * The "to" recipients of the message.
      *
      * @var array
      */
-    public $to = [];
+    protected $to = [];
 
     /**
      * The "cc" recipients of the message.
      *
      * @var array
      */
-    public $cc = [];
+    protected $cc = [];
 
     /**
      * The "bcc" recipients of the message.
      *
      * @var array
      */
-    public $bcc = [];
+    protected $bcc = [];
 
     /**
      * The "reply to" recipients of the message.
      *
      * @var array
      */
-    public $replyTo = [];
+    protected $replyTo = [];
 
     /**
      * The subject of the message.
      *
      * @var string
      */
-    public $subject;
+    protected $subject;
 
     /**
      * The view to use for the message.
      *
      * @var string
      */
-    public $view;
+    protected $view;
 
     /**
      * The plain text view to use for the message.
      *
      * @var string
      */
-    public $textView;
+    protected $textView;
 
     /**
      * The view data for the message.
      *
      * @var array
      */
-    public $viewData = [];
+    protected $viewData = [];
 
     /**
      * The attachments for the message.
      *
      * @var array
      */
-    public $attachments = [];
+    protected $attachments = [];
 
     /**
      * The raw attachments for the message.
      *
      * @var array
      */
-    public $rawAttachments = [];
+    protected $rawAttachments = [];
 
     /**
      * The callbacks for the message.
      *
      * @var array
      */
-    public $callbacks = [];
+    protected $callbacks = [];
 
     /**
      * Send the message using the given mailer.
@@ -185,14 +185,12 @@ class Mailable implements MailableContract
      *
      * @return array
      */
-    public function buildViewData()
+    protected function buildViewData()
     {
         $data = $this->viewData;
 
         foreach ((new ReflectionClass($this))->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
-            if ($property->getDeclaringClass()->getName() != self::class) {
-                $data[$property->getName()] = $property->getValue($this);
-            }
+            $data[$property->getName()] = $property->getValue($this);
         }
 
         return $data;
